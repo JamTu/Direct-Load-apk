@@ -2,14 +2,24 @@ package com.lody.plugin.control;
 
 import android.app.Activity;
 import android.app.Application;
-import android.app.FragmentManager;
 import android.app.Instrumentation;
-import android.os.Build;
+import android.content.Context;
+import android.content.Intent;
+import android.content.res.Configuration;
 import android.os.Bundle;
+import android.util.AttributeSet;
 import android.view.KeyEvent;
+import android.view.View;
 
+import com.lody.plugin.control.LPluginInstrument;
+import com.lody.plugin.control.PluginActivityCallback;
 import com.lody.plugin.reflect.Reflect;
 import com.lody.plugin.reflect.ReflectException;
+
+import java.io.FileDescriptor;
+import java.io.PrintWriter;
+import android.os.*;
+import android.app.*;
 
 /**
  * Created by lody  on 2015/3/26.
@@ -17,13 +27,17 @@ import com.lody.plugin.reflect.ReflectException;
  * 插件的控制器<br>
  * 派发插件事件和控制插件生命周期
  */
-public class PluginActivityControl implements PluginActivityCaller {
+public class PluginActivityControl implements PluginActivityCallback
+{
+
+
 
     Activity proxy;//代理Activity
     Activity plugin;//插件Activity
     Reflect proxyRef;//指向代理Activity的反射工具类
     Reflect pluginRef;//指向插件Activity的反射工具类
     Application app;//分派给插件的Application
+	Instrumentation i;
 
 
     /**
@@ -31,8 +45,9 @@ public class PluginActivityControl implements PluginActivityCaller {
      * @param proxy 代理Activity
      * @param plugin 插件Activity
      */
-    public PluginActivityControl(Activity proxy, Activity plugin) {
-        this(proxy, plugin,null);
+    public PluginActivityControl(Activity proxy, Activity plugin)
+	{
+        this(proxy, plugin, null);
 
     }
 
@@ -42,67 +57,67 @@ public class PluginActivityControl implements PluginActivityCaller {
      * @param plugin 插件Activity
      * @param app 分派给插件的Application
      */
-    public PluginActivityControl(Activity proxy, Activity plugin,Application app) {
+    public PluginActivityControl(Activity proxy, Activity plugin, Application app)
+	{
         this.proxy = proxy;
         this.plugin = plugin;
         this.app = app;
+		
+		i = new Instrumentation();
 
         //使反射工具类指向相应的对象
         proxyRef = Reflect.on(proxy);
         pluginRef = Reflect.on(plugin);
     }
 
-    public void dispatchProxyToPlugin() {
-        try {
-            //TODO:开始伪装插件为实体Activity
-            pluginRef.set("mDecor", proxyRef.get("mDecor"));
-            pluginRef.set("mTitleColor", proxyRef.get("mTitleColor"));
-            pluginRef.set("mWindowManager", proxyRef.get("mWindowManager"));
-            pluginRef.set("mWindow", proxy.getWindow());
-            pluginRef.set("mManagedDialogs", proxyRef.get("mManagedDialogs"));
-            pluginRef.set("mCurrentConfig", proxyRef.get("mCurrentConfig"));
-            pluginRef.set("mSearchManager", proxyRef.get("mSearchManager"));
-            pluginRef.set("mMenuInflater", proxyRef.get("mMenuInflater"));
-            pluginRef.set("mConfigChangeFlags", proxyRef.get("mConfigChangeFlags"));
-            pluginRef.set("mIntent", proxyRef.get("mIntent"));
-            pluginRef.set("mToken", proxyRef.get("mToken"));
-            //TODO:用于改变插件的跳转目标
+    public void dispatchProxyToPlugin()
+	{
+
+        if (plugin.getBaseContext() != null) return;
+        try
+		{
+            //Finals 修改以前的注入方式，采用原生的方式
             Instrumentation instrumentation = proxyRef.get("mInstrumentation");
-            pluginRef.set("mInstrumentation", new LPluginInstrument(instrumentation));
+            pluginRef.call(
+                    // 方法名
+                    "attach",
+                    // Context context
+                    proxy,
+                    // ActivityThread aThread
+                    proxyRef.get("mMainThread"),
+                    // Instrumentation instr
+                    new LPluginInstrument(instrumentation),
+                    // IBinder token
+                    proxyRef.get("mToken"),
+                    // int ident
+                    proxyRef.get("mEmbeddedID") ==null ? 0:proxyRef.get("mEmbeddedID"),
+                    // Application application
+                    app == null ? proxy.getApplication() : app,
+                    // Intent intent
+                    proxy.getIntent(),
+                    // ActivityInfo info
+                    proxyRef.get("mActivityInfo"),
+                    // CharSequence title
+                    proxy.getTitle(),
+                    // Activity parent
+                    proxy.getParent(),
+                    // String id
+                    proxyRef.get("mEmbeddedID"),
+                    // NonConfigurationInstances lastNonConfigurationInstances
+                    proxy.getLastNonConfigurationInstance(),
+                    // Configuration config
+                    proxyRef.get("mCurrentConfig"));
 
-            pluginRef.set("mMainThread", proxyRef.get("mMainThread"));
-            pluginRef.set("mEmbeddedID", proxyRef.get("mEmbeddedID"));
-            //TODO:支持插件自定义Application特征
-            pluginRef.set("mApplication",app == null ? proxy.getApplication() : app);
-            pluginRef.set("mComponent", proxyRef.get("mComponent"));
-            pluginRef.set("mActivityInfo", proxyRef.get("mActivityInfo"));
-            pluginRef.set("mAllLoaderManagers", proxyRef.get("mAllLoaderManagers"));
-            pluginRef.set("mLoaderManager", proxyRef.get("mLoaderManager"));
-            //TODO:支持插件的Fragment
-            if (Build.VERSION.SDK_INT >= 13) {
-                //在android 3.2 以后，Android引入了Fragment.
-                FragmentManager mFragments = proxy.getFragmentManager();
-                pluginRef.set("mFragments", mFragments);
-                pluginRef.set("mContainer", proxyRef.get("mContainer"));
-            }
-            //TODO:支持ActionBar
-            if (Build.VERSION.SDK_INT >= 12) {
-                //在android 3.0 以后，Android引入了ActionBar.
-                pluginRef.set("mActionBar", proxyRef.get("mActionBar"));
-            }
+            pluginRef.set("mWindow", proxy.getWindow());
+			 plugin.getWindow().setCallback(plugin);
+			Reflect.on(proxy.getBaseContext()).call("setOuterContext",plugin);
+			
 
-            pluginRef.set("mUiThread", proxyRef.get("mUiThread"));
-            pluginRef.set("mHandler", proxyRef.get("mHandler"));
-            pluginRef.set("mInstanceTracker", proxyRef.get("mInstanceTracker"));
-            pluginRef.set("mTitle", proxyRef.get("mTitle"));
-            pluginRef.set("mResultData", proxyRef.get("mResultData"));
-            pluginRef.set("mDefaultKeySsb", proxyRef.get("mDefaultKeySsb"));
-            //TODO:改变Window回调目标
-            plugin.getWindow().setCallback(plugin);
-
-        } catch (ReflectException e) {
-            //Ignore
-        }
+		}
+		catch (ReflectException e)
+		{
+			e.printStackTrace();
+		}
 
     }
 
@@ -110,7 +125,8 @@ public class PluginActivityControl implements PluginActivityCaller {
     /**
      * @return 插件的Activity
      */
-    public Activity getPlugin() {
+    public Activity getPlugin()
+	{
         return plugin;
     }
 
@@ -118,7 +134,8 @@ public class PluginActivityControl implements PluginActivityCaller {
      * 设置插件的Activity
      * @param plugin
      */
-    public void setPlugin(Activity plugin) {
+    public void setPlugin(Activity plugin)
+	{
         this.plugin = plugin;
         proxyRef = Reflect.on(plugin);
     }
@@ -127,7 +144,8 @@ public class PluginActivityControl implements PluginActivityCaller {
      * 得到代理的Activity
      * @return
      */
-    public Activity getProxy() {
+    public Activity getProxy()
+	{
         return proxy;
     }
 
@@ -135,7 +153,8 @@ public class PluginActivityControl implements PluginActivityCaller {
      * 设置代理的Activity
      * @param proxy
      */
-    public void setProxy(Activity proxy) {
+    public void setProxy(Activity proxy)
+	{
         this.proxy = proxy;
         proxyRef = Reflect.on(proxy);
     }
@@ -143,7 +162,8 @@ public class PluginActivityControl implements PluginActivityCaller {
     /**
      * @return 代理Activity的反射工具类
      */
-    public Reflect getProxyRef() {
+    public Reflect getProxyRef()
+	{
         return proxyRef;
     }
 
@@ -151,7 +171,8 @@ public class PluginActivityControl implements PluginActivityCaller {
      *
      * @return 插件Activity的反射工具类
      */
-    public Reflect getPluginRef() {
+    public Reflect getPluginRef()
+	{
         return pluginRef;
     }
 
@@ -162,8 +183,10 @@ public class PluginActivityControl implements PluginActivityCaller {
      * @param saveInstance
      */
     @Override
-    public void callOnCreate(Bundle saveInstance) {
-        getPluginRef().call("onCreate", saveInstance);
+    public void callOnCreate(Bundle saveInstance)
+	{
+        //getPluginRef().call("onCreate", saveInstance);
+		i.callActivityOnCreate(plugin,saveInstance);
     }
 
     /**
@@ -171,8 +194,10 @@ public class PluginActivityControl implements PluginActivityCaller {
      * @see android.app.Activity#onStart()
      */
     @Override
-    public void callOnStart() {
-        getPluginRef().call("onStart");
+    public void callOnStart()
+	{
+        //getPluginRef().call("onStart");
+		i.callActivityOnStop(plugin);
     }
 
     /**
@@ -180,8 +205,10 @@ public class PluginActivityControl implements PluginActivityCaller {
      * @see android.app.Activity#onResume()
      */
     @Override
-    public void callOnResume() {
-        getPluginRef().call("onResume");
+    public void callOnResume()
+	{
+        //getPluginRef().call("onResume");
+		i.callActivityOnResume(plugin);
     }
 
     /**
@@ -189,8 +216,10 @@ public class PluginActivityControl implements PluginActivityCaller {
      * @see android.app.Activity#onDestroy()
      */
     @Override
-    public void callOnDestroy() {
-        getPluginRef().call("onDestroy");
+    public void callOnDestroy()
+	{
+        //getPluginRef().call("onDestroy");
+		i.callActivityOnDestroy(plugin);
     }
 
     /**
@@ -198,8 +227,10 @@ public class PluginActivityControl implements PluginActivityCaller {
      * @see android.app.Activity#onStop()
      */
     @Override
-    public void callOnStop() {
-        getPluginRef().call("onStop");
+    public void callOnStop()
+	{
+        //getPluginRef().call("onStop");
+		i.callActivityOnStop(plugin);
     }
 
     /**
@@ -207,8 +238,10 @@ public class PluginActivityControl implements PluginActivityCaller {
      * @see android.app.Activity#onRestart()
      */
     @Override
-    public void callOnRestart() {
-        getPluginRef().call("onRestart");
+    public void callOnRestart()
+	{
+        //getPluginRef().call("onRestart");
+		i.callActivityOnRestart(plugin);
     }
 
     /**
@@ -217,7 +250,8 @@ public class PluginActivityControl implements PluginActivityCaller {
      * @param outState
      */
     @Override
-    public void callOnSaveInstanceState(Bundle outState) {
+    public void callOnSaveInstanceState(Bundle outState)
+	{
         getPluginRef().call("onSaveInstanceState", outState);
     }
 
@@ -227,7 +261,8 @@ public class PluginActivityControl implements PluginActivityCaller {
      * @param savedInstanceState
      */
     @Override
-    public void callOnRestoreInstanceState(Bundle savedInstanceState) {
+    public void callOnRestoreInstanceState(Bundle savedInstanceState)
+	{
         getPluginRef().call("onRestoreInstanceState", savedInstanceState);
     }
 
@@ -236,8 +271,10 @@ public class PluginActivityControl implements PluginActivityCaller {
      * @see android.app.Activity#onStop()
      */
     @Override
-    public void callOnPause() {
-        getPluginRef().call("onStop");
+    public void callOnPause()
+	{
+        //getPluginRef().call("onStop");
+		i.callActivityOnPause(plugin);
     }
 
     /**
@@ -245,8 +282,10 @@ public class PluginActivityControl implements PluginActivityCaller {
      * @see android.app.Activity#onBackPressed()
      */
     @Override
-    public void callOnBackPressed() {
-        getPluginRef().call("onBackPressed");
+    public void callOnBackPressed()
+	{
+        //getPluginRef().call("onBackPressed");
+		plugin.onBackPressed();
     }
 
     /**
@@ -257,8 +296,63 @@ public class PluginActivityControl implements PluginActivityCaller {
      * @return
      */
     @Override
-    public boolean callOnKeyDown(int keyCode, KeyEvent event) {
-        return getPluginRef().call("onKeyDown",keyCode,event).get();
+    public boolean callOnKeyDown(int keyCode, KeyEvent event)
+	{
+		return plugin.onKeyDown(keyCode,event);
+        //return (Boolean)getPluginRef().call("onKeyDown", keyCode, event).get();
+    }
+
+    //Finals ADD 修复Fragment BUG
+    @Override
+    public void callDump(String prefix, FileDescriptor fd, PrintWriter writer,
+                         String[] args)
+	{
+        //getPluginRef().call("dump", prefix, fd, writer, args);
+		plugin.dump(prefix,fd,writer,args);
+    }
+
+    @Override
+    public void callOnConfigurationChanged(Configuration newConfig)
+	{
+        //getPluginRef().call("onConfigurationChanged", newConfig);
+		plugin.onConfigurationChanged(newConfig);
+    }
+
+    @Override
+    public void callOnPostResume()
+	{
+        getPluginRef().call("onPostResume");
+		
+    }
+
+    @Override
+    public void callOnDetachedFromWindow()
+	{
+        //getPluginRef().call("onDetachedFromWindow");
+		plugin.onDetachedFromWindow();
+    }
+
+    @Override
+    public View callOnCreateView(String name, Context context,
+                                 AttributeSet attrs)
+	{
+		return plugin.onCreateView(name,context,attrs);
+        //return getPluginRef().call("onCreateView", name, context, attrs).get();
+    }
+
+    @Override
+    public View callOnCreateView(View parent, String name, Context context,
+                                 AttributeSet attrs)
+	{
+		return plugin.onCreateView(parent,name,context,attrs);
+       // return getPluginRef().call("onCreateView", parent, name, context, attrs).get();
+    }
+
+    @Override
+    public void callOnNewIntent(Intent intent)
+	{
+       // getPluginRef().call("onNewIntent");
+	   i.callActivityOnNewIntent(plugin,intent);
     }
 
 }
